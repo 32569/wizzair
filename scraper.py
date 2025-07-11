@@ -1,14 +1,15 @@
+# scraper.py
 import csv
 import datetime
 import re
 from playwright.sync_api import sync_playwright
 
 # ─── KONFIGŪRACIJA ────────────────────────────────────────────────────────────
-ORIGIN      = "VIE"          # išvykimo oro uostas
-DEST        = "EVN"          # atvykimo oro uostas
-OUT_DATE    = "2025-08-23"   # YYYY-MM-DD
-RETURN_DATE = "2025-08-30"   # YYYY-MM-DD
-PAX         = 1              # keleivių skaičius
+ORIGIN      = "VIE"
+DEST        = "EVN"
+OUT_DATE    = "2025-08-23"
+RETURN_DATE = "2025-08-30"
+PAX         = 1
 # ────────────────────────────────────────────────────────────────────────────
 
 def fetch_price() -> float:
@@ -26,16 +27,20 @@ def fetch_price() -> float:
                 "Chrome/115.0.0.0 Safari/537.36"
             )
         )
-        # laukiame kol puslapis parsinamas (DOMContentLoaded), bet ne „networkidle“
+        # 1) Nuvežame į puslapį, laukiame DOMContentLoaded
         page.goto(url, wait_until="domcontentloaded", timeout=60000)
 
-        # papildomas timeout, kad React hologramai suspustųsi
+        # 2) Palaukiame, kad React prisisemtų elementus
         page.wait_for_timeout(5000)
 
-        # 1) bandome rasti <div class="current-price">
+        # 3) Jei iššoko session-expire modalas, paspaudžiam “START A NEW SEARCH”
+        if page.locator('text="START A NEW SEARCH"').count() > 0:
+            page.click('text="START A NEW SEARCH"')
+            page.wait_for_timeout(2000)
+
+        # 4) Dabar ieškom kainos
         if page.locator("div.current-price").count() > 0:
             text = page.inner_text("div.current-price")
-        # 2) arba paimame data-test reikšmę iš .price bloko
         elif page.locator("div.price [data-test]").count() > 0:
             val = page.get_attribute("div.price [data-test]", "data-test")
             text = f"€{val}"
@@ -45,22 +50,22 @@ def fetch_price() -> float:
 
         browser.close()
 
-    # išvalom ir konvertuojam "€69.99" → 69.99
+    # 5) Išvalom tekstą ir paverčiam float’u
     m = re.search(r"[\d.,]+", text)
     if not m:
-        raise RuntimeError(f"Negaliu išskaityti skaičiaus iš '{text}'")
+        raise RuntimeError(f"Negaliu išskaityti kainos iš '{text}'")
     return float(m.group(0).replace(",", ""))
 
 def append_to_csv(date_str: str, price: float):
-    # jei CSV neegzistuoja – sukuriam su header'iu
+    # jei CSV dar neegzistuoja – sukuriam su header’iu
     try:
         open("prices.csv", "r").close()
     except FileNotFoundError:
         with open("prices.csv", "w", newline="") as f:
-            csv.writer(f).writerow(["date", "price"])
+            csv.writer(f).writerow(["date","price"])
 
     # pridedam eilutę
-    with open("prices.csv", "a", newline="") as f:
+    with open("prices.csv","a",newline="") as f:
         csv.writer(f).writerow([date_str, f"{price:.2f}"])
     print(f"{date_str} ⇒ €{price:.2f}")
 
