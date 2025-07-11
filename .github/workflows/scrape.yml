@@ -18,12 +18,14 @@ jobs:
           python-version: '3.x'
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install playwright
+          playwright install --with-deps
 
       - name: Run scraper
         run: python scraper.py
 
-      - name: Commit CSV
+      - name: Commit updated CSV
         uses: stefanzweifel/git-auto-commit-action@v4
         with:
           commit_message: "Auto-update flight price"
