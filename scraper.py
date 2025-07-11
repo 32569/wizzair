@@ -4,11 +4,11 @@ import datetime
 import requests
 
 # ─── KONFIGŪRACIJA ────────────────────────────────────────────────────────────
-ORIGIN      = "VIE"
-DEST        = "EVN"
-OUT_DATE    = "2025-08-23"
-RETURN_DATE = "2025-08-28"
-PAX         = 1
+ORIGIN      = "VIE"          # Išvykimo (departure) oro uostas
+DEST        = "EVN"          # Atvykimo (arrival) oro uostas
+OUT_DATE    = "2025-08-23"   # Išvykimo data YYYY-MM-DD
+RETURN_DATE = "2025-08-30"   # Grįžimo data YYYY-MM-DD
+PAX         = 1              # Keleivių skaičius
 # ────────────────────────────────────────────────────────────────────────────
 
 def fetch_price():
@@ -30,26 +30,26 @@ def fetch_price():
     resp.raise_for_status()
     html = resp.text
 
-    # Regex: ieškome <div … class="current-price">€69.99</div>
-    m = re.search(
-        r'<div[^>]*class="current-price"[^>]*>€\s*([\d.,]+)</div>',
-        html
-    )
+    # IEŠKOME data-test="69.99" (ten visada bus serverio‐pateikta kaina)
+    m = re.search(r'data-test="([\d\.,]+)"', html)
     if not m:
-        raise RuntimeError("Kainos elemento nerasta HTML")
-    # Pašalinam tūkst. kablelius:
+        # jei norime dar pažiūrėti visą resp.text, galima:
+        # print(html); exit(1)
+        raise RuntimeError("Kainos elemento nerasta HTML (data-test).")
+
+    # Iš duoto string'o išvalom tūkst. kablelius
     price = float(m.group(1).replace(",", ""))
     return price
 
 def append_to_csv(date_str, price):
-    # jei CSV neegzistuoja – sukuriam su headeriu
+    # jei dar nėra – sukuriam CSV su header'iu
     try:
         open("prices.csv", "r").close()
     except FileNotFoundError:
         with open("prices.csv", "w", newline="") as f:
             csv.writer(f).writerow(["date", "price"])
 
-    # pridedam eilutę
+    # pridedam naują eilutę
     with open("prices.csv", "a", newline="") as f:
         csv.writer(f).writerow([date_str, f"{price:.2f}"])
     print(f"{date_str} ⇒ €{price:.2f}")
