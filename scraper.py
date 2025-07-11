@@ -1,5 +1,6 @@
 import csv
 import datetime
+import re
 from playwright.sync_api import sync_playwright
 
 # ─── KONFIGŪRACIJA ────────────────────────────────────────────────────────────
@@ -12,7 +13,7 @@ PAX         = 1
 
 def fetch_price() -> float:
     url = (
-        f"https://wizzair.com/en-GB/booking/select-flight/"
+        f"https://wizzair.com/en-gb/booking/select-flight/"
         f"{ORIGIN}/{DEST}/{OUT_DATE}/{RETURN_DATE}/{PAX}/0/0/null"
     )
 
@@ -25,23 +26,41 @@ def fetch_price() -> float:
                 "Chrome/115.0.0.0 Safari/537.36"
             )
         )
-        page.goto(url)
-        # palaukiam, kol atsiras “Select” mygtukas ir kaina
-        page.wait_for_selector("div.current-price", timeout=15000)
-        price_text = page.inner_text("div.current-price")
+        # 1) eikime į puslapį, laukiame network idle
+        page.goto(url, wait_until="networkidle")
+
+        # 2) papildomas delay, kad įsijungtų visi JS-popup’ai / dinamika
+        page.wait_for_timeout(5000)
+
+        # 3) mėginame rasti div.current-price
+        if page.locator("div.current-price").count() > 0:
+            text = page.inner_text("div.current-price")
+        # 4) arba paimame data-test atributą iš pirmo .price > div
+        elif page.locator("div.price [data-test]").count() > 0:
+            text = page.get_attribute("div.price [data-test]", "data-test")
+            # jei tik skaitom skaičius, uždedam €
+            text = "€" + text
+        else:
+            browser.close()
+            raise RuntimeError("Kainos elemento nerasta puslapyje")
+
         browser.close()
 
-    # išvalom, pavyzdžiui "€69.99"
-    return float(price_text.replace("€", "").replace(",", "").strip())
+    # parse "€69.99" → 69.99
+    m = re.search(r"[\d,.]+", text)
+    if not m:
+        raise RuntimeError(f"Klaida, negalima išskaityti skaičiaus iš '{text}'")
+    return float(m.group(0).replace(",", ""))
 
 def append_to_csv(date_str: str, price: float):
-    # jei failo dar nėra – sukuriam header'į
+    # jeigu CSV neegzistuoja – sukuriam jį su headeriu
     try:
         open("prices.csv", "r").close()
     except FileNotFoundError:
         with open("prices.csv", "w", newline="") as f:
             csv.writer(f).writerow(["date", "price"])
-    # pridedam naują eilutę
+
+    # pridedam eilutę
     with open("prices.csv", "a", newline="") as f:
         csv.writer(f).writerow([date_str, f"{price:.2f}"])
     print(f"{date_str} ⇒ €{price:.2f}")
