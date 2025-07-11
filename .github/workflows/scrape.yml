@@ -1,7 +1,7 @@
 name: Daily Flight Price Scraper
 
 on:
-  workflow_dispatch:    # leidžia rankiniu būdu paspausti "Run workflow"
+  workflow_dispatch:    # leidžia rankiniu būdu “Run workflow”
   schedule:
     - cron: '0 9 * * *' # kasdien 09:00 UTC
 
@@ -10,10 +10,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
+      - name: Checkout repo
         uses: actions/checkout@v3
 
-      - name: Setup Python 3.x
+      - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.x'
@@ -24,7 +24,7 @@ jobs:
       - name: Run scraper
         run: python scraper.py
 
-      - name: Commit updated CSV
+      - name: Commit prices.csv
         uses: stefanzweifel/git-auto-commit-action@v4
         with:
           commit_message: "Auto-update flight price"
