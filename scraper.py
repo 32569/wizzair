@@ -4,11 +4,11 @@ import re
 from playwright.sync_api import sync_playwright
 
 # ─── KONFIGŪRACIJA ────────────────────────────────────────────────────────────
-ORIGIN      = "VIE"
-DEST        = "EVN"
-OUT_DATE    = "2025-08-23"
-RETURN_DATE = "2025-08-30"
-PAX         = 1
+ORIGIN      = "VIE"          # išvykimo oro uostas
+DEST        = "EVN"          # atvykimo oro uostas
+OUT_DATE    = "2025-08-23"   # YYYY-MM-DD
+RETURN_DATE = "2025-08-30"   # YYYY-MM-DD
+PAX         = 1              # keleivių skaičius
 # ────────────────────────────────────────────────────────────────────────────
 
 def fetch_price() -> float:
@@ -26,34 +26,33 @@ def fetch_price() -> float:
                 "Chrome/115.0.0.0 Safari/537.36"
             )
         )
-        # 1) eikime į puslapį, laukiame network idle
-        page.goto(url, wait_until="networkidle")
+        # laukiame kol puslapis parsinamas (DOMContentLoaded), bet ne „networkidle“
+        page.goto(url, wait_until="domcontentloaded", timeout=60000)
 
-        # 2) papildomas delay, kad įsijungtų visi JS-popup’ai / dinamika
+        # papildomas timeout, kad React hologramai suspustųsi
         page.wait_for_timeout(5000)
 
-        # 3) mėginame rasti div.current-price
+        # 1) bandome rasti <div class="current-price">
         if page.locator("div.current-price").count() > 0:
             text = page.inner_text("div.current-price")
-        # 4) arba paimame data-test atributą iš pirmo .price > div
+        # 2) arba paimame data-test reikšmę iš .price bloko
         elif page.locator("div.price [data-test]").count() > 0:
-            text = page.get_attribute("div.price [data-test]", "data-test")
-            # jei tik skaitom skaičius, uždedam €
-            text = "€" + text
+            val = page.get_attribute("div.price [data-test]", "data-test")
+            text = f"€{val}"
         else:
             browser.close()
             raise RuntimeError("Kainos elemento nerasta puslapyje")
 
         browser.close()
 
-    # parse "€69.99" → 69.99
-    m = re.search(r"[\d,.]+", text)
+    # išvalom ir konvertuojam "€69.99" → 69.99
+    m = re.search(r"[\d.,]+", text)
     if not m:
-        raise RuntimeError(f"Klaida, negalima išskaityti skaičiaus iš '{text}'")
+        raise RuntimeError(f"Negaliu išskaityti skaičiaus iš '{text}'")
     return float(m.group(0).replace(",", ""))
 
 def append_to_csv(date_str: str, price: float):
-    # jeigu CSV neegzistuoja – sukuriam jį su headeriu
+    # jei CSV neegzistuoja – sukuriam su header'iu
     try:
         open("prices.csv", "r").close()
     except FileNotFoundError:
