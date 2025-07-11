@@ -1,15 +1,14 @@
+import re
 import csv
 import datetime
-import re
 import requests
-from bs4 import BeautifulSoup
 
 # ─── KONFIGŪRACIJA ────────────────────────────────────────────────────────────
-ORIGIN      = "VIE"          # Išvykimo oro uostas
-DEST        = "EVN"          # Atvykimo oro uostas
-OUT_DATE    = "2025-08-23"   # Išvykimo data YYYY-MM-DD
-RETURN_DATE = "2025-08-28"   # Grįžimo data YYYY-MM-DD
-PAX         = 1              # Keleivių skaičius
+ORIGIN      = "VIE"
+DEST        = "EVN"
+OUT_DATE    = "2025-08-23"
+RETURN_DATE = "2025-08-28"
+PAX         = 1
 # ────────────────────────────────────────────────────────────────────────────
 
 def fetch_price():
@@ -29,34 +28,28 @@ def fetch_price():
     }
     resp = requests.get(url, headers=headers)
     resp.raise_for_status()
+    html = resp.text
 
-    soup = BeautifulSoup(resp.text, "html.parser")
-    # pagrindinis bilieto kainos elementas
-    price_div = soup.find("div", class_="current-price")
-    if not price_div:
-        # arba su tėviniu .price bloku
-        price_div = soup.select_one("div.price div.current-price")
-    if not price_div:
-        raise RuntimeError("Price element not found in HTML")
-
-    text = price_div.get_text(strip=True)  # pvz. "€69.99"
-    m = re.search(r"[\d.,]+", text)
+    # Regex: ieškome <div … class="current-price">€69.99</div>
+    m = re.search(
+        r'<div[^>]*class="current-price"[^>]*>€\s*([\d.,]+)</div>',
+        html
+    )
     if not m:
-        raise RuntimeError(f"Cannot parse number from '{text}'")
-
-    # € ženklą ir tūkst. kablelius
-    price_str = m.group(0).replace(",", "")
-    return float(price_str)
+        raise RuntimeError("Kainos elemento nerasta HTML")
+    # Pašalinam tūkst. kablelius:
+    price = float(m.group(1).replace(",", ""))
+    return price
 
 def append_to_csv(date_str, price):
-    # jei failas neegzistuoja – sukuriam su header'iu
+    # jei CSV neegzistuoja – sukuriam su headeriu
     try:
         open("prices.csv", "r").close()
     except FileNotFoundError:
         with open("prices.csv", "w", newline="") as f:
             csv.writer(f).writerow(["date", "price"])
 
-    # rašom naują eilutę
+    # pridedam eilutę
     with open("prices.csv", "a", newline="") as f:
         csv.writer(f).writerow([date_str, f"{price:.2f}"])
     print(f"{date_str} ⇒ €{price:.2f}")
@@ -67,5 +60,5 @@ if __name__ == "__main__":
         price = fetch_price()
         append_to_csv(today, price)
     except Exception as e:
-        print("Error fetching or saving price:", e)
+        print("Klaida:", e)
         exit(1)
