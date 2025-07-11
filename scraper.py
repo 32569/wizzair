@@ -1,6 +1,6 @@
 import csv
 import datetime
-import json
+import re
 import requests
 from bs4 import BeautifulSoup
 
@@ -8,20 +8,17 @@ from bs4 import BeautifulSoup
 ORIGIN      = "VIE"          # Išvykimo oro uostas
 DEST        = "EVN"          # Atvykimo oro uostas
 OUT_DATE    = "2025-08-23"   # Išvykimo data YYYY-MM-DD
-RETURN_DATE = "2025-08-28"   # Grįžimo data YYYY-MM-DD (jei tik vienpusis, pakarto OUT_DATE)
+RETURN_DATE = "2025-08-28"   # Grįžimo data YYYY-MM-DD
 PAX         = 1              # Keleivių skaičius
 # ────────────────────────────────────────────────────────────────────────────
 
 def fetch_price():
-    # 1) Susikuriam URL, kaip matosi adresų juostoje
     url = (
         f"https://wizzair.com/en-GB/booking/select-flight/"
         f"{ORIGIN}/{DEST}/"
         f"{OUT_DATE}/{RETURN_DATE}/"
         f"{PAX}/0/0/null"
     )
-
-    # 2) Tikras browserio User-Agent ir kalba
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -30,35 +27,36 @@ def fetch_price():
         ),
         "Accept-Language": "en-GB,en;q=0.9"
     }
-
     resp = requests.get(url, headers=headers)
     resp.raise_for_status()
 
-    # 3) Parsinam HTML, surandam __NEXT_DATA__ JSON
-    soup   = BeautifulSoup(resp.text, "html.parser")
-    script = soup.find("script", id="__NEXT_DATA__")
-    if not script or not script.string:
-        raise RuntimeError("NEXT_DATA script not found")
+    soup = BeautifulSoup(resp.text, "html.parser")
+    # pagrindinis bilieto kainos elementas
+    price_div = soup.find("div", class_="current-price")
+    if not price_div:
+        # arba su tėviniu .price bloku
+        price_div = soup.select_one("div.price div.current-price")
+    if not price_div:
+        raise RuntimeError("Price element not found in HTML")
 
-    data = json.loads(script.string)
+    text = price_div.get_text(strip=True)  # pvz. "€69.99"
+    m = re.search(r"[\d.,]+", text)
+    if not m:
+        raise RuntimeError(f"Cannot parse number from '{text}'")
 
-    # 4) Naviguojam iki kainų bloko
-    fares = data["props"]["pageProps"]["searchResults"]["fareGroups"]
-    if not fares or not fares[0]["fares"]:
-        raise RuntimeError("No fares found in JSON")
-
-    total_price = fares[0]["fares"][0]["price"]["total"]
-    return float(total_price)
+    # € ženklą ir tūkst. kablelius
+    price_str = m.group(0).replace(",", "")
+    return float(price_str)
 
 def append_to_csv(date_str, price):
-    # Jei CSV neegzistuoja – sukuriam su headeriu
+    # jei failas neegzistuoja – sukuriam su header'iu
     try:
         open("prices.csv", "r").close()
     except FileNotFoundError:
         with open("prices.csv", "w", newline="") as f:
             csv.writer(f).writerow(["date", "price"])
 
-    # Pridedam naują eilutę
+    # rašom naują eilutę
     with open("prices.csv", "a", newline="") as f:
         csv.writer(f).writerow([date_str, f"{price:.2f}"])
     print(f"{date_str} ⇒ €{price:.2f}")
