@@ -1,57 +1,56 @@
 import csv
 import datetime
+import json
 import requests
+from bs4 import BeautifulSoup
 
-# 1) Konfigūracija – pakeisk ORIGIN, DEST, DATE pagal savo maršrutą
-ORIGIN = "VIE"         # Vienna
-DEST   = "EVN"         # Yerevan
-DATE   = "2025-08-23"  # flight date in YYYY-MM-DD
+# ─── KONFIGŪRACIJA ────────────────────────────────────────────────────────────
+ORIGIN      = "VIE"          # IŠSILAIPINIMO ORO UOSTAS
+DEST        = "EVN"          # ĮSILAIPINIMO ORO UOSTAS
+OUT_DATE    = "2025-08-23"   # IŠVYKIMO DATA YYYY-MM-DD
+RETURN_DATE = "2025-08-28"   # GRĮŽIMO DATA YYYY-MM-DD (jei tik vienpusis, palik tą pačią)
+PAX         = 1              # Keleivių skaičius
+# ────────────────────────────────────────────────────────────────────────────
 
 def fetch_price():
-    """
-    Čia turi įrašyti tą URL, kurį matai naršyklės Network skiltyje,
-    kai puslapis kraunasi. Dažnai būna JSON API kaip:
-      https://wizzair.com/_next/data/.../en-GB/flight-search?departureStation=VIE&arrivalStation=EVN&departureDate=2025-08-23&ADT=1
-    """
+    # 1) Kraunam puslapį
     url = (
-        "https://wizzair.com/_next/data/abcd1234/en-GB/flight-search"
-        f"?departureStation={ORIGIN}"
-        f"&arrivalStation={DEST}"
-        f"&departureDate={DATE}"
-        "&ADT=1"
+        f"https://wizzair.com/en-GB/booking/select-flight/"
+        f"{ORIGIN}/{DEST}/"
+        f"{OUT_DATE}/{RETURN_DATE}/"
+        f"{PAX}/0/0/null"
     )
-
     headers = {
-        "User-Agent": "Mozilla/5.0 (compatible; FlightPriceBot/1.0)",
-        "Accept": "application/json"
+        "User-Agent": "Mozilla/5.0 (FlightPriceBot)",
+        "Accept": "text/html,application/xhtml+xml",
     }
-
     resp = requests.get(url, headers=headers)
     resp.raise_for_status()
-    data = resp.json()
 
-    # 2) Priklausomai nuo JSON struktūros – rask, kur saugoma kaina.
-    #    Pvz., kartais tai:
-    #      data["pageProps"]["results"]["fares"][0]["price"]["total"]
-    #    Žemiau – tik pavyzdys, pakeisk pagal tikrą struktūrą.
-    price = data["pageProps"]["results"]["fares"][0]["price"]["total"]
+    # 2) Ištraukiam React __NEXT_DATA__ JSON (viduje, bet ne rašom į failą)
+    soup   = BeautifulSoup(resp.text, "html.parser")
+    script = soup.find("script", id="__NEXT_DATA__")
+    data   = json.loads(script.string)
 
-    return float(price)
+    # 3) Naviguojam iki kainų bloko
+    fare_groups = data["props"]["pageProps"]["searchResults"]["fareGroups"]
+
+    # 4) Imam pirmos grupės pirmą tarifą
+    total_price = fare_groups[0]["fares"][0]["price"]["total"]
+    return float(total_price)
 
 def append_to_csv(date_str, price):
-    file_exists = False
+    # Sukuria CSV su headeriu, jeigu dar neegzistuoja
     try:
-        with open("prices.csv", "r", newline="") as f:
-            file_exists = True
+        open("prices.csv", "r").close()
     except FileNotFoundError:
-        file_exists = False
+        with open("prices.csv", "w", newline="") as f:
+            csv.writer(f).writerow(["date", "price"])
 
+    # Papildo nauja eilute
     with open("prices.csv", "a", newline="") as f:
-        writer = csv.writer(f)
-        if not file_exists:
-            writer.writerow(["date", "price"])
-        writer.writerow([date_str, f"{price:.2f}"])
-    print(f"Recorded: {date_str}, €{price:.2f}")
+        csv.writer(f).writerow([date_str, f"{price:.2f}"])
+    print(f"{date_str} ⇒ €{price:.2f}")
 
 if __name__ == "__main__":
     today = datetime.date.today().isoformat()
