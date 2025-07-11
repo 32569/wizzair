@@ -1,7 +1,6 @@
 # scraper.py
 import csv
 import datetime
-import re
 from playwright.sync_api import sync_playwright
 
 # ─── KONFIGŪRACIJA ────────────────────────────────────────────────────────────
@@ -13,10 +12,7 @@ PAX         = 1
 # ────────────────────────────────────────────────────────────────────────────
 
 def fetch_price() -> float:
-    url = (
-        f"https://wizzair.com/en-gb/booking/select-flight/"
-        f"{ORIGIN}/{DEST}/{OUT_DATE}/{RETURN_DATE}/{PAX}/0/0/null"
-    )
+    price_json = None
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=True)
@@ -27,34 +23,42 @@ def fetch_price() -> float:
                 "Chrome/115.0.0.0 Safari/537.36"
             )
         )
-        # 1) Nuvežame į puslapį, laukiame DOMContentLoaded
+
+        # 1) Intercept'insime visus JSON atsakymus, kurių URL turi "flight-search"
+        def handle_response(resp):
+            nonlocal price_json
+            if "flight-search" in resp.url and "application/json" in (resp.headers.get("content-type") or ""):
+                try:
+                    j = resp.json()
+                except:
+                    return
+                # raktai gali būti šiek tiek kitokie, bet toks tas pagrindas:
+                fg = j.get("pageProps", {})\
+                      .get("searchResults", {})\
+                      .get("fareGroups", [])
+                if fg and fg[0].get("fares"):
+                    price_json = fg
+
+        page.on("response", handle_response)
+
+        # 2) Eikime į puslapį
+        url = (
+            f"https://wizzair.com/en-gb/booking/select-flight/"
+            f"{ORIGIN}/{DEST}/{OUT_DATE}/{RETURN_DATE}/{PAX}/0/0/null"
+        )
         page.goto(url, wait_until="domcontentloaded", timeout=60000)
 
-        # 2) Palaukiame, kad React prisisemtų elementus
-        page.wait_for_timeout(5000)
-
-        # 3) Jei iššoko session-expire modalas, paspaudžiam “START A NEW SEARCH”
-        if page.locator('text="START A NEW SEARCH"').count() > 0:
-            page.click('text="START A NEW SEARCH"')
-            page.wait_for_timeout(2000)
-
-        # 4) Dabar ieškom kainos
-        if page.locator("div.current-price").count() > 0:
-            text = page.inner_text("div.current-price")
-        elif page.locator("div.price [data-test]").count() > 0:
-            val = page.get_attribute("div.price [data-test]", "data-test")
-            text = f"€{val}"
-        else:
-            browser.close()
-            raise RuntimeError("Kainos elemento nerasta puslapyje")
+        # 3) Palaukiame kelias sekundes, kad XHR’ai suspustųsi
+        page.wait_for_timeout(8000)
 
         browser.close()
 
-    # 5) Išvalom tekstą ir paverčiam float’u
-    m = re.search(r"[\d.,]+", text)
-    if not m:
-        raise RuntimeError(f"Negaliu išskaityti kainos iš '{text}'")
-    return float(m.group(0).replace(",", ""))
+    if not price_json:
+        raise RuntimeError("Netikėtai nepagauta jokio flight-search JSON")
+
+    # 4) Iš price_json traukiam pirmos grupės pirmą tarifą
+    total = price_json[0]["fares"][0]["price"]["total"]
+    return float(total)
 
 def append_to_csv(date_str: str, price: float):
     # jei CSV dar neegzistuoja – sukuriam su header’iu
@@ -64,7 +68,7 @@ def append_to_csv(date_str: str, price: float):
         with open("prices.csv", "w", newline="") as f:
             csv.writer(f).writerow(["date","price"])
 
-    # pridedam eilutę
+    # pridedam datą+kainą
     with open("prices.csv","a",newline="") as f:
         csv.writer(f).writerow([date_str, f"{price:.2f}"])
     print(f"{date_str} ⇒ €{price:.2f}")
