@@ -3,7 +3,7 @@ name: Daily Flight Price Scraper
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 9 * * *'  # kasdien 09:00 UTC
+    - cron: '0 9 * * *'
 
 jobs:
   scrape:
